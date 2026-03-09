@@ -5,15 +5,14 @@ const MODEL = process.env.OPENROUTER_MODEL || "deepseek/deepseek-v3.2";
 
 export async function POST(request: NextRequest) {
   try {
-    const { foodName, amount } = await request.json();
+    const { foodName } = await request.json();
 
     if (!foodName) {
       return NextResponse.json({ error: "음식명은 필수입니다." }, { status: 400 });
     }
 
     if (!process.env.OPENROUTER_API_KEY) {
-      // API 키 없을 때 기본 추정 폴백
-      return NextResponse.json(estimateFallback(foodName, amount));
+      return NextResponse.json(estimateFallback(foodName));
     }
 
     const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
@@ -24,20 +23,20 @@ export async function POST(request: NextRequest) {
         messages: [
           {
             role: "system",
-            content: `당신은 영양 정보 전문가입니다. 사용자가 입력한 음식의 영양 정보를 추정합니다.
+            content: `당신은 영양 정보 전문가입니다. 사용자가 입력한 음식의 100g당 영양 정보와 일반적인 1인분 기준 그램수를 추정합니다.
 반드시 아래 JSON 형식으로만 응답하세요. 다른 설명은 불필요합니다:
 {
-  "calories": 숫자,
-  "protein": 숫자(g),
-  "carbs": 숫자(g),
-  "fat": 숫자(g)
+  "caloriesPer100g": 숫자,
+  "proteinPer100g": 숫자(g),
+  "carbsPer100g": 숫자(g),
+  "fatPer100g": 숫자(g),
+  "servingGrams": 숫자 (일반적인 1인분의 그램수)
 }
-현실적이고 정확한 값을 제공하세요. 한식 기준으로 추정하되, 양이 명시되지 않으면 일반적인 1인분 기준으로 계산하세요.`,
+현실적이고 정확한 값을 제공하세요. 한식 기준으로 추정하세요.`,
           },
           {
             role: "user",
-            content: `음식: ${foodName}${amount ? `, 양: ${amount}` : " (1인분)"}
-이 음식의 칼로리와 영양소(단백질, 탄수화물, 지방)를 JSON으로 알려주세요.`,
+            content: `음식: ${foodName}\n이 음식의 100g당 칼로리와 영양소, 그리고 일반적인 1인분의 그램수를 JSON으로 알려주세요.`,
           },
         ],
         temperature: 0.3,
@@ -49,20 +48,21 @@ export async function POST(request: NextRequest) {
     if ("choices" in response && response.choices?.[0]?.message?.content) {
       const text = response.choices[0].message.content;
       const parsed = parseJSON(text);
-      if (parsed) {
+      if (parsed && parsed.caloriesPer100g) {
         return NextResponse.json({
-          calories: Math.round(parsed.calories || 0),
-          protein: Math.round(parsed.protein || 0),
-          carbs: Math.round(parsed.carbs || 0),
-          fat: Math.round(parsed.fat || 0),
+          caloriesPer100g: Math.round(parsed.caloriesPer100g || 0),
+          proteinPer100g: Math.round(parsed.proteinPer100g || 0),
+          carbsPer100g: Math.round(parsed.carbsPer100g || 0),
+          fatPer100g: Math.round(parsed.fatPer100g || 0),
+          servingGrams: Math.round(parsed.servingGrams || 200),
         });
       }
     }
 
-    return NextResponse.json(estimateFallback(foodName, amount));
+    return NextResponse.json(estimateFallback(foodName));
   } catch (error) {
     console.error("Food estimate error:", error);
-    return NextResponse.json(estimateFallback("기본", "1인분"));
+    return NextResponse.json(estimateFallback("기본"));
   }
 }
 
@@ -76,21 +76,39 @@ function parseJSON(text: string): Record<string, number> | null {
   }
 }
 
-function estimateFallback(foodName: string, amount?: string) {
-  // 간단한 키워드 기반 폴백 추정
+// 100g 기준 영양정보 폴백
+function estimateFallback(foodName: string) {
   const lower = (foodName || "").toLowerCase();
-  const portion = amount ? 1 : 1;
 
-  if (lower.includes("밥")) return { calories: 300 * portion, protein: 6, carbs: 65, fat: 1 };
-  if (lower.includes("라면")) return { calories: 500 * portion, protein: 10, carbs: 70, fat: 16 };
-  if (lower.includes("치킨") || lower.includes("닭")) return { calories: 350 * portion, protein: 30, carbs: 10, fat: 20 };
-  if (lower.includes("삼겹살")) return { calories: 450 * portion, protein: 20, carbs: 0, fat: 38 };
-  if (lower.includes("비빔밥")) return { calories: 480 * portion, protein: 18, carbs: 72, fat: 12 };
-  if (lower.includes("김치찌개")) return { calories: 200 * portion, protein: 12, carbs: 10, fat: 12 };
-  if (lower.includes("샐러드")) return { calories: 150 * portion, protein: 5, carbs: 15, fat: 7 };
-  if (lower.includes("빵") || lower.includes("토스트")) return { calories: 280 * portion, protein: 8, carbs: 45, fat: 8 };
-  if (lower.includes("커피") || lower.includes("아메리카노")) return { calories: 5, protein: 0, carbs: 1, fat: 0 };
-  if (lower.includes("우유") || lower.includes("라떼")) return { calories: 150, protein: 7, carbs: 12, fat: 8 };
+  // { caloriesPer100g, proteinPer100g, carbsPer100g, fatPer100g, servingGrams }
+  if (lower.includes("밥") || lower.includes("공기"))
+    return { caloriesPer100g: 150, proteinPer100g: 3, carbsPer100g: 33, fatPer100g: 0, servingGrams: 200 };
+  if (lower.includes("라면"))
+    return { caloriesPer100g: 440, proteinPer100g: 9, carbsPer100g: 62, fatPer100g: 16, servingGrams: 120 };
+  if (lower.includes("치킨") || lower.includes("닭"))
+    return { caloriesPer100g: 230, proteinPer100g: 20, carbsPer100g: 8, fatPer100g: 13, servingGrams: 150 };
+  if (lower.includes("삼겹살"))
+    return { caloriesPer100g: 330, proteinPer100g: 15, carbsPer100g: 0, fatPer100g: 30, servingGrams: 200 };
+  if (lower.includes("비빔밥"))
+    return { caloriesPer100g: 130, proteinPer100g: 5, carbsPer100g: 20, fatPer100g: 3, servingGrams: 400 };
+  if (lower.includes("김치찌개"))
+    return { caloriesPer100g: 55, proteinPer100g: 4, carbsPer100g: 3, fatPer100g: 3, servingGrams: 400 };
+  if (lower.includes("샐러드"))
+    return { caloriesPer100g: 50, proteinPer100g: 2, carbsPer100g: 5, fatPer100g: 2, servingGrams: 300 };
+  if (lower.includes("빵") || lower.includes("토스트"))
+    return { caloriesPer100g: 280, proteinPer100g: 8, carbsPer100g: 48, fatPer100g: 6, servingGrams: 100 };
+  if (lower.includes("커피") || lower.includes("아메리카노"))
+    return { caloriesPer100g: 2, proteinPer100g: 0, carbsPer100g: 0, fatPer100g: 0, servingGrams: 300 };
+  if (lower.includes("우유") || lower.includes("라떼"))
+    return { caloriesPer100g: 63, proteinPer100g: 3, carbsPer100g: 5, fatPer100g: 3, servingGrams: 250 };
+  if (lower.includes("계란") || lower.includes("달걀"))
+    return { caloriesPer100g: 155, proteinPer100g: 13, carbsPer100g: 1, fatPer100g: 11, servingGrams: 60 };
+  if (lower.includes("떡볶이"))
+    return { caloriesPer100g: 170, proteinPer100g: 4, carbsPer100g: 33, fatPer100g: 3, servingGrams: 300 };
+  if (lower.includes("피자"))
+    return { caloriesPer100g: 270, proteinPer100g: 11, carbsPer100g: 33, fatPer100g: 10, servingGrams: 200 };
+  if (lower.includes("햄버거") || lower.includes("버거"))
+    return { caloriesPer100g: 250, proteinPer100g: 13, carbsPer100g: 25, fatPer100g: 11, servingGrams: 220 };
 
-  return { calories: 300, protein: 10, carbs: 40, fat: 10 };
+  return { caloriesPer100g: 150, proteinPer100g: 5, carbsPer100g: 20, fatPer100g: 5, servingGrams: 200 };
 }

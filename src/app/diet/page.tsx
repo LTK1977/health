@@ -96,16 +96,70 @@ export default function DietPage() {
   const [formCarbs, setFormCarbs] = useState("");
   const [formFat, setFormFat] = useState("");
 
-  // AI 음식 칼로리 자동추정 (debounced: 음식명이나 양이 바뀔 때마다 자동 재추정)
+  // 100g 기준 영양정보 (AI에서 1회 조회 후 저장)
+  const baseNutritionRef = useRef<{
+    foodName: string;
+    caloriesPer100g: number;
+    proteinPer100g: number;
+    carbsPer100g: number;
+    fatPer100g: number;
+    servingGrams: number;
+  } | null>(null);
   const estimateAbortRef = useRef<AbortController | null>(null);
 
+  // 양 문자열에서 그램수를 파싱 (예: "200g" → 200, "2인분" → 2 * servingGrams, "1근" → 600)
+  const parseAmountToGrams = (amount: string, servingGrams: number): number => {
+    const trimmed = amount.trim().toLowerCase();
+    if (!trimmed) return servingGrams; // 양 미입력 시 1인분
+
+    // "300g", "300그램"
+    const gMatch = trimmed.match(/^(\d+\.?\d*)\s*(g|그램)$/);
+    if (gMatch) return parseFloat(gMatch[1]);
+
+    // "0.5kg", "1kg", "1킬로"
+    const kgMatch = trimmed.match(/^(\d+\.?\d*)\s*(kg|킬로|킬로그램)$/);
+    if (kgMatch) return parseFloat(kgMatch[1]) * 1000;
+
+    // "2인분", "3인분"
+    const servingMatch = trimmed.match(/^(\d+\.?\d*)\s*인분$/);
+    if (servingMatch) return parseFloat(servingMatch[1]) * servingGrams;
+
+    // "1근" (600g)
+    const geunMatch = trimmed.match(/^(\d+\.?\d*)\s*근$/);
+    if (geunMatch) return parseFloat(geunMatch[1]) * 600;
+
+    // "2개", "3개"
+    const countMatch = trimmed.match(/^(\d+\.?\d*)\s*(개|조각|쪽|장|줄|봉지|컵|잔|공기|그릇|대접)$/);
+    if (countMatch) return parseFloat(countMatch[1]) * servingGrams;
+
+    // 숫자만 입력한 경우 (인분 단위로 간주)
+    const numOnly = trimmed.match(/^(\d+\.?\d*)$/);
+    if (numOnly) return parseFloat(numOnly[1]) * servingGrams;
+
+    return servingGrams; // 파싱 실패 시 1인분
+  };
+
+  // 100g 기준 영양정보로부터 실제 칼로리 계산
+  const calculateFromBase = (amountStr: string) => {
+    const base = baseNutritionRef.current;
+    if (!base) return;
+    const grams = parseAmountToGrams(amountStr, base.servingGrams);
+    const ratio = grams / 100;
+    setFormCalories(String(Math.round(base.caloriesPer100g * ratio)));
+    setFormProtein(String(Math.round(base.proteinPer100g * ratio)));
+    setFormCarbs(String(Math.round(base.carbsPer100g * ratio)));
+    setFormFat(String(Math.round(base.fatPer100g * ratio)));
+  };
+
+  // 음식명 변경 시 → AI 1회 호출하여 100g 기준 영양정보 가져오기
   useEffect(() => {
     const foodName = formFoodName.trim();
     if (!foodName) return;
 
-    // 입력이 바뀔 때마다 800ms 대기 후 추정 (debounce)
+    // 이미 같은 음식의 기준 정보가 있으면 재호출하지 않음
+    if (baseNutritionRef.current?.foodName === foodName) return;
+
     const timer = setTimeout(async () => {
-      // 이전 요청이 진행 중이면 취소
       if (estimateAbortRef.current) {
         estimateAbortRef.current.abort();
       }
@@ -117,18 +171,21 @@ export default function DietPage() {
         const res = await fetch("/api/ai/food-estimate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            foodName,
-            amount: formAmount.trim() || undefined,
-          }),
+          body: JSON.stringify({ foodName }),
           signal: abortController.signal,
         });
         if (res.ok) {
           const data = await res.json();
-          setFormCalories(String(data.calories || ""));
-          setFormProtein(String(data.protein || ""));
-          setFormCarbs(String(data.carbs || ""));
-          setFormFat(String(data.fat || ""));
+          baseNutritionRef.current = {
+            foodName,
+            caloriesPer100g: data.caloriesPer100g || 150,
+            proteinPer100g: data.proteinPer100g || 5,
+            carbsPer100g: data.carbsPer100g || 20,
+            fatPer100g: data.fatPer100g || 5,
+            servingGrams: data.servingGrams || 200,
+          };
+          // 현재 입력된 양으로 즉시 계산
+          calculateFromBase(formAmount);
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -139,7 +196,15 @@ export default function DietPage() {
     }, 800);
 
     return () => clearTimeout(timer);
-  }, [formFoodName, formAmount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formFoodName]);
+
+  // 양 변경 시 → AI 호출 없이 즉시 곱셈 계산
+  useEffect(() => {
+    if (!baseNutritionRef.current) return;
+    calculateFromBase(formAmount);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formAmount]);
 
   // Redirect if no user
   useEffect(() => {
@@ -246,6 +311,7 @@ export default function DietPage() {
     setFormProtein("");
     setFormCarbs("");
     setFormFat("");
+    baseNutritionRef.current = null;
   };
 
   // Submit diet record
@@ -467,17 +533,18 @@ export default function DietPage() {
                         value={formFoodName}
                         onChange={(e) => setFormFoodName(e.target.value)}
                       />
-                      <p className="text-xs text-gray-400">음식명과 양을 입력하면 AI가 칼로리를 자동 추정합니다</p>
+                      <p className="text-xs text-gray-400">음식명 입력 시 AI가 기본 영양정보를 조회합니다</p>
                     </div>
 
                     {/* Amount */}
                     <div className="space-y-2">
                       <Label>양</Label>
                       <Input
-                        placeholder="예: 1공기, 200g, 1인분"
+                        placeholder="예: 1인분, 200g, 2개, 1근"
                         value={formAmount}
                         onChange={(e) => setFormAmount(e.target.value)}
                       />
+                      <p className="text-xs text-gray-400">양에 따라 칼로리가 자동 계산됩니다</p>
                     </div>
 
                     {/* AI 추정 중 표시 */}
