@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppLayout from "@/components/layout/AppLayout";
 import { useStore } from "@/hooks/useStore";
@@ -96,43 +96,50 @@ export default function DietPage() {
   const [formCarbs, setFormCarbs] = useState("");
   const [formFat, setFormFat] = useState("");
 
-  // AI 음식 칼로리 자동추정
-  const estimateNutrition = async (foodName: string, amount: string) => {
-    if (!foodName.trim()) return;
-    setIsEstimating(true);
-    try {
-      const res = await fetch("/api/ai/food-estimate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ foodName: foodName.trim(), amount: amount.trim() || undefined }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFormCalories(String(data.calories || ""));
-        setFormProtein(String(data.protein || ""));
-        setFormCarbs(String(data.carbs || ""));
-        setFormFat(String(data.fat || ""));
+  // AI 음식 칼로리 자동추정 (debounced: 음식명이나 양이 바뀔 때마다 자동 재추정)
+  const estimateAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const foodName = formFoodName.trim();
+    if (!foodName) return;
+
+    // 입력이 바뀔 때마다 800ms 대기 후 추정 (debounce)
+    const timer = setTimeout(async () => {
+      // 이전 요청이 진행 중이면 취소
+      if (estimateAbortRef.current) {
+        estimateAbortRef.current.abort();
       }
-    } catch (err) {
-      console.error("Nutrition estimation failed:", err);
-    } finally {
-      setIsEstimating(false);
-    }
-  };
+      const abortController = new AbortController();
+      estimateAbortRef.current = abortController;
 
-  // 음식명 입력 후 포커스 벗어나면 자동 추정
-  const handleFoodNameBlur = () => {
-    if (formFoodName.trim() && !formCalories) {
-      estimateNutrition(formFoodName, formAmount);
-    }
-  };
+      setIsEstimating(true);
+      try {
+        const res = await fetch("/api/ai/food-estimate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            foodName,
+            amount: formAmount.trim() || undefined,
+          }),
+          signal: abortController.signal,
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setFormCalories(String(data.calories || ""));
+          setFormProtein(String(data.protein || ""));
+          setFormCarbs(String(data.carbs || ""));
+          setFormFat(String(data.fat || ""));
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("Nutrition estimation failed:", err);
+      } finally {
+        setIsEstimating(false);
+      }
+    }, 800);
 
-  // 양 입력 후 포커스 벗어나면 재추정
-  const handleAmountBlur = () => {
-    if (formFoodName.trim() && formAmount.trim()) {
-      estimateNutrition(formFoodName, formAmount);
-    }
-  };
+    return () => clearTimeout(timer);
+  }, [formFoodName, formAmount]);
 
   // Redirect if no user
   useEffect(() => {
@@ -459,9 +466,8 @@ export default function DietPage() {
                         placeholder="예: 현미밥, 김치찌개, 삼겹살..."
                         value={formFoodName}
                         onChange={(e) => setFormFoodName(e.target.value)}
-                        onBlur={handleFoodNameBlur}
                       />
-                      <p className="text-xs text-gray-400">음식 이름을 입력하면 AI가 칼로리를 자동 추정합니다</p>
+                      <p className="text-xs text-gray-400">음식명과 양을 입력하면 AI가 칼로리를 자동 추정합니다</p>
                     </div>
 
                     {/* Amount */}
@@ -471,7 +477,6 @@ export default function DietPage() {
                         placeholder="예: 1공기, 200g, 1인분"
                         value={formAmount}
                         onChange={(e) => setFormAmount(e.target.value)}
-                        onBlur={handleAmountBlur}
                       />
                     </div>
 
