@@ -29,6 +29,7 @@ import {
   Award,
   Flame,
   Calendar,
+  Utensils,
 } from "lucide-react";
 import {
   LineChart,
@@ -43,7 +44,6 @@ import {
   Legend,
 } from "recharts";
 import type { WeeklyReport } from "@/types/record";
-import type { AIUserContext } from "@/lib/ai-service";
 
 // ------- Badge definitions -------
 interface BadgeDef {
@@ -131,40 +131,6 @@ function getConsecutiveStreak(dates: string[]): number {
   return maxStreak;
 }
 
-/** Generate mock weight data for the last N days trending downward. */
-function generateMockWeightData(startWeight: number, days: number) {
-  const data: { date: string; weight: number }[] = [];
-  const now = new Date();
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
-    const noise = (Math.random() - 0.4) * 0.3;
-    const trend = startWeight - ((days - 1 - i) / (days - 1)) * 2;
-    data.push({
-      date: dateStr,
-      weight: Math.round((trend + noise) * 10) / 10,
-    });
-  }
-  return data;
-}
-
-/** Generate mock calorie data for last 7 days. */
-function generateMockCalorieData(targetCalories: number) {
-  const data: { date: string; calories: number; target: number }[] = [];
-  const now = new Date();
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    const dateStr = d.toISOString().split("T")[0];
-    data.push({
-      date: dateStr,
-      calories: Math.round(1500 + Math.random() * 700),
-      target: targetCalories,
-    });
-  }
-  return data;
-}
 
 // ------- Main Component -------
 
@@ -215,18 +181,6 @@ export default function ReportPage() {
   const daysRemaining =
     remainingKg > 0 ? Math.ceil((remainingKg / weeklyLossRate) * 7) : 0;
 
-  // AI context
-  const aiContext: AIUserContext | null = user
-    ? {
-        profile: user.profile,
-        health: user.health,
-        exercisePrefs: user.exercisePrefs,
-        goal: user.goal,
-        targetCalories,
-        macros,
-      }
-    : null;
-
   // Load weekly report on mount
   useEffect(() => {
     if (!user) return;
@@ -238,16 +192,13 @@ export default function ReportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // ------- Weight tab data -------
+  // ------- Weight tab data (실제 기록만 표시) -------
   const weightChartData = useMemo(() => {
-    if (weightRecords.length > 0) {
-      return weightRecords.map((r) => ({
-        date: r.date,
-        weight: r.weight,
-      }));
-    }
-    return generateMockWeightData(startWeight, 30);
-  }, [weightRecords, startWeight]);
+    return weightRecords.map((r) => ({
+      date: r.date,
+      weight: r.weight,
+    }));
+  }, [weightRecords]);
 
   const minWeight = useMemo(
     () =>
@@ -271,22 +222,20 @@ export default function ReportPage() {
     [weightChartData]
   );
 
-  // ------- Diet tab data -------
+  // ------- Diet tab data (실제 기록만 표시) -------
   const calorieChartData = useMemo(() => {
-    if (dietRecords.length > 0) {
-      const now = new Date();
-      const days: { date: string; calories: number; target: number }[] = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        const dateStr = d.toISOString().split("T")[0];
-        const dayRecords = dietRecords.filter((r) => r.date === dateStr);
-        const cal = dayRecords.reduce((s, r) => s + r.macros.calories, 0);
-        days.push({ date: dateStr, calories: cal, target: targetCalories });
-      }
-      return days;
+    if (dietRecords.length === 0) return [];
+    const now = new Date();
+    const days: { date: string; calories: number; target: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dateStr = d.toISOString().split("T")[0];
+      const dayRecords = dietRecords.filter((r) => r.date === dateStr);
+      const cal = dayRecords.reduce((s, r) => s + r.macros.calories, 0);
+      days.push({ date: dateStr, calories: cal, target: targetCalories });
     }
-    return generateMockCalorieData(targetCalories);
+    return days;
   }, [dietRecords, targetCalories]);
 
   const avgDailyCalories = useMemo(() => {
@@ -314,43 +263,32 @@ export default function ReportPage() {
 
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    if (exerciseRecords.length > 0) {
-      const completedRecords = exerciseRecords.filter((r) => r.completed);
+    const completedRecords = exerciseRecords.filter((r) => r.completed);
 
-      // This week unique exercise days
-      const weekDays = new Set(
-        completedRecords
-          .filter((r) => new Date(r.date) >= startOfWeek)
-          .map((r) => r.date)
-      );
+    // This week unique exercise days
+    const weekDays = new Set(
+      completedRecords
+        .filter((r) => new Date(r.date) >= startOfWeek)
+        .map((r) => r.date)
+    );
 
-      // This month
-      const monthRecords = completedRecords.filter(
-        (r) => new Date(r.date) >= startOfMonth
-      );
-      const monthDays = new Set(monthRecords.map((r) => r.date));
-      const totalMinutes = monthRecords.reduce(
-        (s, r) => s + (r.durationMinutes ?? 30),
-        0
-      );
-      const estimatedCalories = monthRecords.length * 300;
+    // This month
+    const monthRecords = completedRecords.filter(
+      (r) => new Date(r.date) >= startOfMonth
+    );
+    const monthDays = new Set(monthRecords.map((r) => r.date));
+    const totalMinutes = monthRecords.reduce(
+      (s, r) => s + (r.durationMinutes ?? 30),
+      0
+    );
+    const estimatedCalories = monthRecords.length * 300;
 
-      return {
-        weekDays: weekDays.size,
-        weekTarget: user?.exercisePrefs.weeklyFrequency ?? 5,
-        monthWorkouts: monthDays.size,
-        monthMinutes: totalMinutes,
-        monthCalories: estimatedCalories,
-      };
-    }
-
-    // Mock data for demo
     return {
-      weekDays: 3,
+      weekDays: weekDays.size,
       weekTarget: user?.exercisePrefs.weeklyFrequency ?? 5,
-      monthWorkouts: 12,
-      monthMinutes: 480,
-      monthCalories: 3600,
+      monthWorkouts: monthDays.size,
+      monthMinutes: totalMinutes,
+      monthCalories: estimatedCalories,
     };
   }, [exerciseRecords, user]);
 
@@ -496,74 +434,83 @@ export default function ReportPage() {
                   <CardTitle className="text-sm">체중 변화 추이</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {weightRecords.length === 0 && (
-                    <p className="text-xs text-muted-foreground mb-2">
-                      * 데모 데이터가 표시되고 있습니다
-                    </p>
+                  {weightChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <LineChart data={weightChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={formatDate}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <YAxis
+                          domain={["dataMin - 1", "dataMax + 1"]}
+                          tick={{ fontSize: 11 }}
+                          unit="kg"
+                        />
+                        <Tooltip
+                          formatter={(value: unknown) => [
+                            `${Number(value).toFixed(1)}kg`,
+                            "체중",
+                          ]}
+                          labelFormatter={(label: unknown) => formatDate(String(label))}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="weight"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          dot={{ r: 2 }}
+                          activeDot={{ r: 4 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <TrendingDown className="size-10 text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">
+                        아직 체중 기록이 없습니다.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        설정에서 체중을 기록하면 변화 추이를 확인할 수 있습니다.
+                      </p>
+                    </div>
                   )}
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={weightChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tickFormatter={formatDate}
-                        tick={{ fontSize: 11 }}
-                      />
-                      <YAxis
-                        domain={["dataMin - 1", "dataMax + 1"]}
-                        tick={{ fontSize: 11 }}
-                        unit="kg"
-                      />
-                      <Tooltip
-                        formatter={(value: unknown) => [
-                          `${Number(value).toFixed(1)}kg`,
-                          "체중",
-                        ]}
-                        labelFormatter={(label: unknown) => formatDate(String(label))}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="weight"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        dot={{ r: 2 }}
-                        activeDot={{ r: 4 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
                 </CardContent>
               </Card>
 
-              {/* Weight stats cards */}
-              <div className="grid grid-cols-3 gap-3">
-                <Card>
-                  <CardContent className="text-center py-3">
-                    <p className="text-xs text-muted-foreground">최저 체중</p>
-                    <p className="text-lg font-bold text-foreground">
-                      {minWeight.toFixed(1)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">kg</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="text-center py-3">
-                    <p className="text-xs text-muted-foreground">평균 체중</p>
-                    <p className="text-lg font-bold text-foreground">
-                      {avgWeight.toFixed(1)}
-                    </p>
-                    <p className="text-xs text-muted-foreground">kg</p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="text-center py-3">
-                    <p className="text-xs text-muted-foreground">총 감량</p>
-                    <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                      {totalLost > 0 ? `-${totalLost.toFixed(1)}` : "0"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">kg</p>
-                  </CardContent>
-                </Card>
-              </div>
+              {/* Weight stats cards - 기록이 있을 때만 표시 */}
+              {weightChartData.length > 0 && (
+                <div className="grid grid-cols-3 gap-3">
+                  <Card>
+                    <CardContent className="text-center py-3">
+                      <p className="text-xs text-muted-foreground">최저 체중</p>
+                      <p className="text-lg font-bold text-foreground">
+                        {minWeight.toFixed(1)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">kg</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="text-center py-3">
+                      <p className="text-xs text-muted-foreground">평균 체중</p>
+                      <p className="text-lg font-bold text-foreground">
+                        {avgWeight.toFixed(1)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">kg</p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="text-center py-3">
+                      <p className="text-xs text-muted-foreground">총 감량</p>
+                      <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        {totalLost > 0 ? `-${totalLost.toFixed(1)}` : "0"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">kg</p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -577,79 +524,88 @@ export default function ReportPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  {dietRecords.length === 0 && (
-                    <p className="text-xs text-muted-foreground mb-2">
-                      * 데모 데이터가 표시되고 있습니다
-                    </p>
+                  {calorieChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={250}>
+                      <BarChart data={calorieChartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis
+                          dataKey="date"
+                          tickFormatter={formatDate}
+                          tick={{ fontSize: 11 }}
+                        />
+                        <YAxis tick={{ fontSize: 11 }} unit="kcal" />
+                        <Tooltip
+                          formatter={(value: unknown, name: unknown) => [
+                            `${Number(value).toLocaleString()}kcal`,
+                            String(name) === "calories" ? "섭취" : "목표",
+                          ]}
+                          labelFormatter={(label: unknown) => formatDate(String(label))}
+                        />
+                        <Legend
+                          formatter={(value: string) =>
+                            value === "calories" ? "섭취 칼로리" : "목표 칼로리"
+                          }
+                        />
+                        <Bar
+                          dataKey="calories"
+                          fill="#f59e0b"
+                          radius={[4, 4, 0, 0]}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="target"
+                          stroke="#ef4444"
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          dot={false}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <Utensils className="size-10 text-muted-foreground/30 mb-3" />
+                      <p className="text-sm text-muted-foreground">
+                        아직 식사 기록이 없습니다.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        식단 탭에서 식사를 기록하면 칼로리 추이를 확인할 수 있습니다.
+                      </p>
+                    </div>
                   )}
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={calorieChartData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        dataKey="date"
-                        tickFormatter={formatDate}
-                        tick={{ fontSize: 11 }}
-                      />
-                      <YAxis tick={{ fontSize: 11 }} unit="kcal" />
-                      <Tooltip
-                        formatter={(value: unknown, name: unknown) => [
-                          `${Number(value).toLocaleString()}kcal`,
-                          String(name) === "calories" ? "섭취" : "목표",
-                        ]}
-                        labelFormatter={(label: unknown) => formatDate(String(label))}
-                      />
-                      <Legend
-                        formatter={(value: string) =>
-                          value === "calories" ? "섭취 칼로리" : "목표 칼로리"
-                        }
-                      />
-                      <Bar
-                        dataKey="calories"
-                        fill="#f59e0b"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="target"
-                        stroke="#ef4444"
-                        strokeWidth={2}
-                        strokeDasharray="5 5"
-                        dot={false}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
                 </CardContent>
               </Card>
 
-              {/* Diet stats */}
-              <div className="grid grid-cols-2 gap-3">
-                <Card>
-                  <CardContent className="text-center py-4">
-                    <p className="text-xs text-muted-foreground">
-                      일평균 칼로리
-                    </p>
-                    <p className="text-xl font-bold text-foreground">
-                      {avgDailyCalories.toLocaleString()}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      / {targetCalories.toLocaleString()} kcal
-                    </p>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="text-center py-4">
-                    <p className="text-xs text-muted-foreground">
-                      식단 준수율
-                    </p>
-                    <p className="text-xl font-bold text-foreground">
-                      {dietComplianceRate}%
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      목표 +-10% 이내
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
+              {/* Diet stats - 기록이 있을 때만 표시 */}
+              {calorieChartData.length > 0 && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Card>
+                    <CardContent className="text-center py-4">
+                      <p className="text-xs text-muted-foreground">
+                        일평균 칼로리
+                      </p>
+                      <p className="text-xl font-bold text-foreground">
+                        {avgDailyCalories.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        / {targetCalories.toLocaleString()} kcal
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="text-center py-4">
+                      <p className="text-xs text-muted-foreground">
+                        식단 준수율
+                      </p>
+                      <p className="text-xl font-bold text-foreground">
+                        {dietComplianceRate}%
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        목표 +-10% 이내
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
             </div>
           </TabsContent>
 
@@ -744,9 +700,17 @@ export default function ReportPage() {
               </div>
 
               {exerciseRecords.length === 0 && (
-                <p className="text-xs text-muted-foreground text-center">
-                  * 데모 데이터가 표시되고 있습니다
-                </p>
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <Calendar className="size-10 text-muted-foreground/30 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      아직 운동 기록이 없습니다.
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      운동 탭에서 운동을 완료하면 통계를 확인할 수 있습니다.
+                    </p>
+                  </CardContent>
+                </Card>
               )}
             </div>
           </TabsContent>

@@ -33,12 +33,16 @@ export function buildAIContext(user: User): AIUserContext {
   };
 }
 
-export async function fetchDietPlan(user: User, date: string): Promise<DailyDietPlan> {
+export async function fetchDietPlan(
+  user: User,
+  date: string,
+  excludeMenus?: string[]
+): Promise<DailyDietPlan> {
   const context = buildAIContext(user);
   const res = await fetch("/api/ai/diet", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ context, date }),
+    body: JSON.stringify({ context, date, excludeMenus }),
   });
   if (!res.ok) throw new Error("식단 생성 실패");
   return res.json();

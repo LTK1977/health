@@ -85,6 +85,7 @@ export default function DietPage() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [isEstimating, setIsEstimating] = useState(false);
 
   // Form state for adding a diet record
   const [formMealType, setFormMealType] = useState<MealType>("breakfast");
@@ -94,6 +95,44 @@ export default function DietPage() {
   const [formProtein, setFormProtein] = useState("");
   const [formCarbs, setFormCarbs] = useState("");
   const [formFat, setFormFat] = useState("");
+
+  // AI 음식 칼로리 자동추정
+  const estimateNutrition = async (foodName: string, amount: string) => {
+    if (!foodName.trim()) return;
+    setIsEstimating(true);
+    try {
+      const res = await fetch("/api/ai/food-estimate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ foodName: foodName.trim(), amount: amount.trim() || undefined }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setFormCalories(String(data.calories || ""));
+        setFormProtein(String(data.protein || ""));
+        setFormCarbs(String(data.carbs || ""));
+        setFormFat(String(data.fat || ""));
+      }
+    } catch (err) {
+      console.error("Nutrition estimation failed:", err);
+    } finally {
+      setIsEstimating(false);
+    }
+  };
+
+  // 음식명 입력 후 포커스 벗어나면 자동 추정
+  const handleFoodNameBlur = () => {
+    if (formFoodName.trim() && !formCalories) {
+      estimateNutrition(formFoodName, formAmount);
+    }
+  };
+
+  // 양 입력 후 포커스 벗어나면 재추정
+  const handleAmountBlur = () => {
+    if (formFoodName.trim() && formAmount.trim()) {
+      estimateNutrition(formFoodName, formAmount);
+    }
+  };
 
   // Redirect if no user
   useEffect(() => {
@@ -166,12 +205,23 @@ export default function DietPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Regenerate diet plan
+  // Regenerate diet plan (기존 메뉴 제외하고 새로운 조합 추천)
   const handleRegenerate = async () => {
     if (!user) return;
     setIsGenerating(true);
     try {
-      const plan = await fetchDietPlan(user, todayStr);
+      // 현재 식단의 모든 메뉴명을 추출하여 제외 목록으로 전달
+      const currentMenuNames: string[] = [];
+      if (todayDietPlan?.meals) {
+        for (const meal of todayDietPlan.meals) {
+          for (const item of meal.items) {
+            if (item.name) {
+              currentMenuNames.push(item.name);
+            }
+          }
+        }
+      }
+      const plan = await fetchDietPlan(user, todayStr, currentMenuNames.length > 0 ? currentMenuNames : undefined);
       setTodayDietPlan(plan);
     } catch (error) {
       console.error("Diet plan regeneration failed:", error);
@@ -406,25 +456,36 @@ export default function DietPage() {
                     <div className="space-y-2">
                       <Label>음식 이름</Label>
                       <Input
-                        placeholder="예: 현미밥"
+                        placeholder="예: 현미밥, 김치찌개, 삼겹살..."
                         value={formFoodName}
                         onChange={(e) => setFormFoodName(e.target.value)}
+                        onBlur={handleFoodNameBlur}
                       />
+                      <p className="text-xs text-gray-400">음식 이름을 입력하면 AI가 칼로리를 자동 추정합니다</p>
                     </div>
 
                     {/* Amount */}
                     <div className="space-y-2">
                       <Label>양</Label>
                       <Input
-                        placeholder="예: 1공기, 200g"
+                        placeholder="예: 1공기, 200g, 1인분"
                         value={formAmount}
                         onChange={(e) => setFormAmount(e.target.value)}
+                        onBlur={handleAmountBlur}
                       />
                     </div>
 
+                    {/* AI 추정 중 표시 */}
+                    {isEstimating && (
+                      <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 dark:bg-green-950 rounded-lg p-2">
+                        <div className="w-4 h-4 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
+                        AI가 영양 정보를 추정하고 있습니다...
+                      </div>
+                    )}
+
                     {/* Calories */}
                     <div className="space-y-2">
-                      <Label>칼로리 (kcal)</Label>
+                      <Label>칼로리 (kcal) {formCalories && <Badge variant="secondary" className="ml-1 text-xs">AI 추정</Badge>}</Label>
                       <Input
                         type="number"
                         placeholder="0"

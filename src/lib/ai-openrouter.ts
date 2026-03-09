@@ -108,7 +108,7 @@ function parseJSON<T>(text: string): T | null {
 }
 
 export const openRouterAIService: AIService = {
-  async generateDailyDietPlan(context: AIUserContext, date: string): Promise<DailyDietPlan> {
+  async generateDailyDietPlan(context: AIUserContext, date: string, excludeMenus?: string[]): Promise<DailyDietPlan> {
     const systemPrompt = `당신은 전문 영양사 AI입니다. 사용자의 신체 조건과 목표에 맞는 한식 중심의 건강한 일일 식단을 설계합니다.
 
 규칙:
@@ -137,11 +137,15 @@ export const openRouterAIService: AIService = {
   "note": "오늘 식단에 대한 간단한 설명"
 }`;
 
+    const excludeNote = excludeMenus && excludeMenus.length > 0
+      ? `\n\n중요: 다음 음식들은 이전에 추천한 것이므로 제외하고 다른 메뉴로 구성해 주세요: ${excludeMenus.join(", ")}`
+      : "";
+
     const userPrompt = `${buildUserContextPrompt(context)}
 
 오늘 날짜: ${date}
 위 사용자 정보를 기반으로 일일 ${context.targetCalories}kcal 목표의 식단을 JSON으로 생성해 주세요.
-아침, 점심, 저녁, 간식 4끼를 포함해 주세요.`;
+아침, 점심, 저녁, 간식 4끼를 포함해 주세요.${excludeNote}`;
 
     const response = await chatCompletion(systemPrompt, userPrompt);
     const parsed = parseJSON<{

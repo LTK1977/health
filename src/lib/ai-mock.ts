@@ -113,7 +113,7 @@ function sumMacros(items: { macros: { calories: number; protein: number; carbs: 
 }
 
 export const mockAIService: AIService = {
-  async generateDailyDietPlan(context, date): Promise<DailyDietPlan> {
+  async generateDailyDietPlan(context, date, _excludeMenus?): Promise<DailyDietPlan> {
     await new Promise((r) => setTimeout(r, 500)); // simulate delay
 
     const breakfastItems = pickRandom(BREAKFAST_MENUS, 3);

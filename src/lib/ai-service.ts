@@ -13,7 +13,7 @@ export interface AIUserContext {
 }
 
 export interface AIService {
-  generateDailyDietPlan(context: AIUserContext, date: string): Promise<DailyDietPlan>;
+  generateDailyDietPlan(context: AIUserContext, date: string, excludeMenus?: string[]): Promise<DailyDietPlan>;
   generateDailyExercisePlan(context: AIUserContext, date: string, dayOfWeek: number): Promise<DailyExercisePlan>;
   generateWeeklyReport(context: AIUserContext, weekData: unknown): Promise<WeeklyReport>;
   getMotivationalMessage(context: AIUserContext): Promise<string>;
